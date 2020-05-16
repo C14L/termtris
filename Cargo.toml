@@ -1,9 +1,9 @@
 [package]
-name = "termtris"
-version = "0.1.0"
-authors = ["Christian Steimel <me@C14L.com>"]
-edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name = 'termtris'
+version = '0.1.0'
+authors = ['Christian Steimel <me@C14L.com>']
+edition = '2018'
 
 [dependencies]
+crossterm = '0.17.4'
+rand = '0.7.3'
