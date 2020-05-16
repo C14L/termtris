@@ -2,12 +2,13 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 
-use std::io::{stdout, Write};
-use std::{thread, time};
 use rand::seq::SliceRandom;
+use std::io::{stdout, Write};
+use std::time;
 
 use crossterm::{
     cursor,
+    event::{poll, read, Event, KeyCode},
     style::{self, SetBackgroundColor, SetForegroundColor},
     terminal, ExecutableCommand, Result,
 };
@@ -21,28 +22,32 @@ const YMAX: usize = 18;
 const FIELD_SIZE: usize = (XMAX * YMAX);
 const XMARGIN: usize = 5;
 const YMARGIN: usize = 2;
-const PIXEL_EMPTY: u8 = b" "[0];
-const PIXEL_SOLID: u8 = b"X"[0];
-const PIXEL_BORDER: u8 = b"#"[0];
+const PIXEL_EMPTY: u8 = b' ';
+const PIXEL_SOLID: u8 = b'X';
+const PIXEL_BORDER: u8 = b'#';
 const BRICKS: [&[u8]; 7] = [
-    r#" X   X   X   X  "#.as_bytes(),
-    r#" XX  XX         "#.as_bytes(),
-    r#" X   X   XX     "#.as_bytes(),
-    r#"  X   X  XX     "#.as_bytes(),
-    r#"XX   XX         "#.as_bytes(),
-    r#"  XX XX         "#.as_bytes(),
-    r#" X   XX  X      "#.as_bytes(),
+    b" X   X   X   X  ",
+    b" XX  XX         ",
+    b" X   X   XX     ",
+    b"  X   X  XX     ",
+    b"XX   XX         ",
+    b"  XX XX         ",
+    b" X   XX  X      ",
 ];
 
 fn main() -> Result<()> {
     let interval = time::Duration::from_millis(200);
     // let now = time::Instant::now();
 
-    let mut bucket_full: bool = false;
-    let mut brick_falling: bool;
+    let _ = terminal::enable_raw_mode()?;
+    let mut is_bucket_full: bool = false;
+    let mut is_brick_falling: bool;
+    let mut is_free_fall: bool;
+    let mut is_paused = false;
+
     let mut field: [u8; FIELD_SIZE] = [PIXEL_EMPTY; FIELD_SIZE];
-    let mut stdout = stdout();
     let mut score: usize = 0;
+    let mut stdout = stdout();
 
     stdout.execute(terminal::Clear(terminal::ClearType::All))?;
 
@@ -71,16 +76,17 @@ fn main() -> Result<()> {
 
     // Game loop
 
-    while !bucket_full {
+    while !is_bucket_full {
         let mut brick = BRICKS.choose(&mut rand::thread_rng()).expect("Raarrrr!");
         let mut y_brick: usize = 0;
         let mut x_brick: usize = XMAX / 2 - 2;
-        brick_falling = true;
+        is_brick_falling = true;
+        is_free_fall = false;
 
         // Per-brick loop
 
-        while brick_falling {
-            thread::sleep(interval);
+        while is_brick_falling {
+            // thread::sleep(interval);
 
             // Clean up block before movement
 
@@ -90,6 +96,39 @@ fn main() -> Result<()> {
                         field[(x_brick + xb) + (y_brick + yb) * XMAX] = b" "[0];
                     }
                 }
+            }
+
+            // Get user input
+
+            if !is_free_fall && poll(interval)? {
+                let event = read()?;
+                if event == Event::Key(KeyCode::Char('q').into()) {
+                    let _ = terminal::disable_raw_mode()?;
+                    panic!("Quit!");
+                }
+                if event == Event::Key(KeyCode::Char('p').into()) {
+                    is_paused = !is_paused;
+                }
+                if event == Event::Key(KeyCode::Left.into()) && x_brick > 1 {
+                    // TODO: here we need collison detecktion, because the brick's
+                    // x=0 axis may be empty an should not hit the left wall!
+                    x_brick -= 1;
+                }
+                if event == Event::Key(KeyCode::Right.into()) && x_brick < XMAX - 3 {
+                    // TODO: here we need collison detecktion, because the brick's
+                    // x=3 axis may be empty an should not hit the right wall!
+                    x_brick += 1;
+                }
+                if event == Event::Key(KeyCode::Up.into()) {
+                    // rotate 90deg cw
+                }
+                if event == Event::Key(KeyCode::Down.into()) {
+                    is_free_fall = true;
+                }
+            }
+
+            if is_paused {
+                continue;
             }
 
             // Move stuff
@@ -105,7 +144,7 @@ fn main() -> Result<()> {
                         let brick_pixel = brick[xb + yb * 4];
                         let field_pixel = field[field_idx];
                         if brick_pixel == PIXEL_SOLID && field_pixel != PIXEL_EMPTY {
-                            brick_falling = false;
+                            is_brick_falling = false;
                             y_brick -= 1;
                         }
                     }
@@ -115,7 +154,7 @@ fn main() -> Result<()> {
             // Bucket full detection
 
             if y_brick == 0 {
-                bucket_full = true;
+                is_bucket_full = true;
             }
 
             // Update field
@@ -142,5 +181,6 @@ fn main() -> Result<()> {
         }
     }
 
+    let _ = terminal::disable_raw_mode()?;
     Ok(())
 }
