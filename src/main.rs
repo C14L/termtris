@@ -105,6 +105,7 @@ fn main() -> Result<()> {
 
         if !is_free_fall && poll(interval)? {
             let event = read()?;
+
             if event == Event::Key(KeyCode::Esc.into()) {
                 let _ = terminal::disable_raw_mode()?;
                 exit(0x0);
@@ -123,10 +124,13 @@ fn main() -> Result<()> {
                 }
             }
             if event == Event::Key(KeyCode::Up.into()) {
-                if rotate_cw {
-                    rotation = if rotation == 3 { 0 } else { rotation + 1 };
+                let new_rot = if rotate_cw {
+                    if rotation == 3 { 0 } else { rotation + 1 }
                 } else {
-                    rotation = if rotation == 0 { 3 } else { rotation - 1 };
+                    if rotation == 0 { 3 } else { rotation - 1 }
+                };
+                if no_collision(&field, brick, new_rot, x_brick, y_brick) {
+                    rotation = new_rot;
                 }
             }
             if event == Event::Key(KeyCode::Down.into()) {
