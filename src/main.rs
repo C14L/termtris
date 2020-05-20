@@ -5,6 +5,7 @@
 use rand::Rng;
 use std::io::{stdout, Write};
 use std::process::exit;
+use std::thread;
 use std::time;
 
 use crossterm::{
@@ -52,19 +53,30 @@ type Field = [u8; FIELD_SIZE as usize];
 fn main() -> Result<()> {
     let _ = terminal::enable_raw_mode()?;
     let mut rng = rand::thread_rng();
+
     let mut is_bucket_full: bool = false;
     let mut is_brick_falling: bool;
-    let mut is_free_fall: bool;
+    let mut is_free_fall: bool = false;
     let mut is_paused = false;
+
     let mut field: Field = [PIXEL_EMPTY; FIELD_SIZE as usize];
     let mut score: usize = 0;
-    let mut brick: usize;
-    let mut rotation: usize; // 1=90deg, 2=180deg, 3=270deg
-    let mut speed: u64 = 400;
-    let mut interval: time::Duration;
+    let mut brick: usize = rng.gen_range(0, BRICKS.len());
+    let mut rotation: usize = 0; // 1=90deg, 2=180deg, 3=270deg
+    let rotate_cw: bool = false;
+
+    let game_tick: usize = 50;
+    let tick_threshold: usize = 5;
+    let mut tick_count: usize = 0;
+    let mut move_brick: bool;
+
+    // let mut interval: time::Duration;
     let mut stdout = stdout();
-    let mut y_brick: isize;
-    let mut x_brick: isize;
+    let mut y_brick: isize = 0;
+    let mut x_brick: isize = XMAX / 2 - (BRICKMAX / 2) as isize;
+
+    let interval = time::Duration::from_millis(game_tick as u64);
+    let delay_delete_row = time::Duration::from_millis(200);
 
     stdout.execute(terminal::Clear(terminal::ClearType::All))?;
 
@@ -86,57 +98,54 @@ fn main() -> Result<()> {
     // Game loop
 
     while !is_bucket_full {
-        interval = time::Duration::from_millis(speed);
-        is_brick_falling = true;
-        is_free_fall = false;
-        rotation = 0;
-        brick = rng.gen_range(0, BRICKS.len());
-        y_brick = 0;
-        x_brick = XMAX / 2 - (BRICKMAX / 2) as isize;
+        tick_count += 1;
+        move_brick = tick_count == tick_threshold;
 
-        // Per-brick loop
+        // Get user input
 
-        while is_brick_falling {
-            // Get user input
-
-            if !is_free_fall && poll(interval)? {
-                let event = read()?;
-                if event == Event::Key(KeyCode::Esc.into()) {
-                    let _ = terminal::disable_raw_mode()?;
-                    exit(0x0);
+        if !is_free_fall && poll(interval)? {
+            let event = read()?;
+            if event == Event::Key(KeyCode::Esc.into()) {
+                let _ = terminal::disable_raw_mode()?;
+                exit(0x0);
+            }
+            if event == Event::Key(KeyCode::Char('p').into()) {
+                is_paused = !is_paused;
+            }
+            if event == Event::Key(KeyCode::Left.into()) {
+                if no_collision(&field, brick, rotation, x_brick - 1, y_brick) {
+                    x_brick -= 1;
                 }
-                if event == Event::Key(KeyCode::Char('p').into()) {
-                    is_paused = !is_paused;
+            }
+            if event == Event::Key(KeyCode::Right.into()) {
+                if no_collision(&field, brick, rotation, x_brick + 1, y_brick) {
+                    x_brick += 1;
                 }
-                if event == Event::Key(KeyCode::Left.into()) {
-                    if collision(&field, brick, rotation, x_brick - 1, y_brick) {
-                        x_brick -= 1;
-                    }
-                }
-                if event == Event::Key(KeyCode::Right.into()) {
-                    if collision(&field, brick, rotation, x_brick + 1, y_brick) {
-                        x_brick += 1;
-                    }
-                }
-                if event == Event::Key(KeyCode::Up.into()) {
+            }
+            if event == Event::Key(KeyCode::Up.into()) {
+                if rotate_cw {
                     rotation = if rotation == 3 { 0 } else { rotation + 1 };
-                }
-                if event == Event::Key(KeyCode::Down.into()) {
-                    is_free_fall = true;
+                } else {
+                    rotation = if rotation == 0 { 3 } else { rotation - 1 };
                 }
             }
-
-            if is_paused {
-                continue;
+            if event == Event::Key(KeyCode::Down.into()) {
+                is_free_fall = true;
             }
+        }
 
-            // Move stuff
+        if is_paused {
+            continue;
+        }
 
-            if collision(&field, brick, rotation, x_brick, y_brick + 1) {
+        // Move stuff
+
+        if move_brick {
+            if no_collision(&field, brick, rotation, x_brick, y_brick + 1) {
                 y_brick += 1;
             } else {
-                is_brick_falling = false;
                 // Add brick to the field
+
                 for yb in 0..BRICKMAX {
                     for xb in 0..BRICKMAX {
                         let brick_idx = rotate(xb, yb, rotation);
@@ -147,55 +156,97 @@ fn main() -> Result<()> {
                         }
                     }
                 }
-            }
 
-            // Bucket full detection
+                // Check for filled lines and delete them
 
-            if y_brick == 0 {
-                is_bucket_full = true;
-            }
-
-            // Paint field, falling brick, score
-
-            for y in 0..YMAX {
-                for x in 0..XMAX {
-                    stdout.execute(cursor::MoveTo((x + XMARGIN) as u16, (y + YMARGIN) as u16))?;
-                    let i = (x + y * XMAX) as usize;
-                    if let 65..=72 = field[i] {
+                for y in 0..(YMAX - 1) {
+                    let field_l = (1 + y * XMAX) as usize;
+                    let field_r = field_l + XMAX as usize - 2;
+                    let mut full_row = true;
+                    for x in field_l..field_r {
+                        if field[x] == PIXEL_EMPTY {
+                            full_row = false;
+                        }
+                    }
+                    if full_row {
+                        // Visual effect, draw it right here
                         stdout
-                            .execute(SetBackgroundColor(BRICKCOLORS[field[i] as usize - 65]))?
-                            .execute(Print(" "))?
-                            .execute(SetBackgroundColor(Color::Black))?;
-                    } else {
-                        stdout.execute(Print(field[i] as char))?;
-                    };
-                }
-            }
-            if is_brick_falling {
-                for yb in 0..BRICKMAX as isize {
-                    for xb in 0..BRICKMAX as isize {
-                        let pi = rotate(xb as usize, yb as usize, rotation);
-                        if BRICKS[brick][pi] == PIXEL_SOLID {
-                            stdout
-                                .execute(cursor::MoveTo(
-                                    (XMARGIN + x_brick + xb) as u16,
-                                    (YMARGIN + y_brick + yb) as u16,
-                                ))?
-                                .execute(SetBackgroundColor(BRICKCOLORS[brick]))?
-                                .execute(Print(" "))?
-                                .execute(SetBackgroundColor(Color::Black))?;
+                            .execute(cursor::MoveTo((XMARGIN + 1) as u16, (YMARGIN + y) as u16))?
+                            .execute(Print("=========="))?
+                            .flush()?;
+
+                        thread::sleep(delay_delete_row);
+                        // Cut row out of playing field
+                        for k in (1..(field_l - 1)).rev() {
+                            if k % XMAX as usize != 0 && k % XMAX as usize != (XMAX as usize - 1) {
+                                field[(k + (XMAX as usize))] = field[k];
+                            }
+                            if k < XMAX as usize {
+                                field[k] = PIXEL_EMPTY;
+                            }
                         }
                     }
                 }
+
+                // Select a new brick
+
+                is_free_fall = false;
+                rotation = 0;
+                brick = rng.gen_range(0, BRICKS.len());
+                y_brick = 0;
+                x_brick = XMAX / 2 - (BRICKMAX / 2) as isize;
+
+                // Bucket full detection
+
+                if !no_collision(&field, brick, rotation, x_brick, y_brick) {
+                    is_bucket_full = true;
+                }
             }
-            stdout
-                .execute(cursor::MoveTo(XSCORE as u16, YSCORE as u16))?
-                .execute(Print(format!("SCORE: {}", score)))?
-                .flush()?;
+
+            tick_count = 0;
         }
+
+        // Paint field, falling brick, score
+
+        for y in 0..YMAX {
+            for x in 0..XMAX {
+                stdout.execute(cursor::MoveTo((x + XMARGIN) as u16, (y + YMARGIN) as u16))?;
+                let i = (x + y * XMAX) as usize;
+                if let 65..=72 = field[i] {
+                    stdout
+                        .execute(SetBackgroundColor(BRICKCOLORS[field[i] as usize - 65]))?
+                        .execute(Print(" "))?
+                        .execute(SetBackgroundColor(Color::Black))?;
+                } else {
+                    stdout.execute(Print(field[i] as char))?;
+                };
+            }
+        }
+
+        for yb in 0..BRICKMAX as isize {
+            for xb in 0..BRICKMAX as isize {
+                let pi = rotate(xb as usize, yb as usize, rotation);
+                if BRICKS[brick][pi] == PIXEL_SOLID {
+                    stdout
+                        .execute(cursor::MoveTo(
+                            (XMARGIN + x_brick + xb) as u16,
+                            (YMARGIN + y_brick + yb) as u16,
+                        ))?
+                        .execute(SetBackgroundColor(BRICKCOLORS[brick]))?
+                        .execute(Print(" "))?
+                        .execute(SetBackgroundColor(Color::Black))?;
+                }
+            }
+        }
+
+        stdout
+            .execute(cursor::MoveTo(XSCORE as u16, YSCORE as u16))?
+            .execute(Print(format!("SCORE: {}", score)))?
+            .flush()?;
     }
 
     let _ = terminal::disable_raw_mode()?;
+
     Ok(())
 }
 
@@ -210,7 +261,7 @@ fn rotate(px: usize, py: usize, r: usize) -> usize {
     }
 }
 
-fn collision(field: &Field, brick: usize, r: usize, x_brick: isize, y_brick: isize) -> bool {
+fn no_collision(field: &Field, brick: usize, r: usize, x_brick: isize, y_brick: isize) -> bool {
     for yb in 0..BRICKMAX {
         for xb in 0..BRICKMAX {
             let brick_idx = rotate(xb, yb, r);
