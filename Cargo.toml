@@ -7,4 +7,10 @@ edition = '2018'
 [dependencies]
 crossterm = "0.17.4"
 rand = "0.7.3"
-log = { version = "0.4", features = ["std", "serde"] }
+
+# Optimize resulting binary for size:
+[profile.release]
+opt-level = 'z'  # level 3 (default) optimizes for binary speed
+lto = true  # Enable Link Time Optimization (LTO)
+codegen-units = 1  # Use only one codegen unit to build for some extra optimizations
+panic = 'abort'  # Remove stack trace on panic to safe size

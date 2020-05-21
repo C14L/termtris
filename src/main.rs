@@ -11,10 +11,9 @@ use std::time;
 use crossterm::{
     cursor,
     event::{poll, read, Event, KeyCode},
-    style::{self, SetBackgroundColor, SetForegroundColor},
+    style::{Color, Print, SetBackgroundColor, SetForegroundColor},
     terminal, ExecutableCommand, Result,
 };
-use style::{Color, Print};
 
 const XMAX: isize = 12;
 const YMAX: isize = 18;
@@ -60,23 +59,27 @@ fn main() -> Result<()> {
     let mut is_paused = false;
 
     let mut field: Field = [PIXEL_EMPTY; FIELD_SIZE as usize];
+    let mut previous_field: Field = [PIXEL_EMPTY; FIELD_SIZE as usize];
+
     let mut score: usize = 0;
     let mut brick: usize = rng.gen_range(0, BRICKS.len());
     let mut rotation: usize = 0; // 1=90deg, 2=180deg, 3=270deg
     let rotate_cw: bool = false;
+    let mut y_brick: isize = 0;
+    let mut x_brick: isize = XMAX / 2 - (BRICKMAX / 2) as isize;
+    let mut previous_y_brick: isize = y_brick;
+    let mut previous_x_brick: isize = x_brick;
+    let mut previous_rotation: usize = rotation;
 
     let game_tick: usize = 50;
     let tick_threshold: usize = 5;
     let mut tick_count: usize = 0;
     let mut move_brick: bool;
 
-    // let mut interval: time::Duration;
-    let mut stdout = stdout();
-    let mut y_brick: isize = 0;
-    let mut x_brick: isize = XMAX / 2 - (BRICKMAX / 2) as isize;
-
     let interval = time::Duration::from_millis(game_tick as u64);
     let delay_delete_row = time::Duration::from_millis(200);
+
+    let mut stdout = stdout();
 
     stdout.execute(terminal::Clear(terminal::ClearType::All))?;
 
@@ -125,9 +128,17 @@ fn main() -> Result<()> {
             }
             if event == Event::Key(KeyCode::Up.into()) {
                 let new_rot = if rotate_cw {
-                    if rotation == 3 { 0 } else { rotation + 1 }
+                    if rotation == 3 {
+                        0
+                    } else {
+                        rotation + 1
+                    }
                 } else {
-                    if rotation == 0 { 3 } else { rotation - 1 }
+                    if rotation == 0 {
+                        3
+                    } else {
+                        rotation - 1
+                    }
                 };
                 if no_collision(&field, brick, new_rot, x_brick, y_brick) {
                     rotation = new_rot;
@@ -195,12 +206,18 @@ fn main() -> Result<()> {
                 // Select a new brick
 
                 is_free_fall = false;
-                rotation = 0;
+                move_brick = false;
                 brick = rng.gen_range(0, BRICKS.len());
-                y_brick = 0;
-                x_brick = XMAX / 2 - (BRICKMAX / 2) as isize;
 
-                // Bucket full detection
+                x_brick = XMAX / 2 - (BRICKMAX / 2) as isize;
+                y_brick = 0;
+                rotation = 0;
+
+                previous_x_brick = x_brick;
+                previous_y_brick = y_brick;
+                previous_rotation = rotation;
+
+                // Entire bucket full detection
 
                 if !no_collision(&field, brick, rotation, x_brick, y_brick) {
                     is_bucket_full = true;
@@ -210,35 +227,70 @@ fn main() -> Result<()> {
             tick_count = 0;
         }
 
-        // Paint field, falling brick, score
+        // Paint field
 
-        for y in 0..YMAX {
-            for x in 0..XMAX {
-                stdout.execute(cursor::MoveTo((x + XMARGIN) as u16, (y + YMARGIN) as u16))?;
-                let i = (x + y * XMAX) as usize;
-                if let 65..=72 = field[i] {
-                    stdout
-                        .execute(SetBackgroundColor(BRICKCOLORS[field[i] as usize - 65]))?
-                        .execute(Print(" "))?
-                        .execute(SetBackgroundColor(Color::Black))?;
-                } else {
-                    stdout.execute(Print(field[i] as char))?;
-                };
+        // Only draw if there was an actual change
+        if field[..] != previous_field[..] {
+            for y in 0..YMAX {
+                for x in 0..XMAX {
+                    let i = (x + y * XMAX) as usize;
+                    stdout.execute(cursor::MoveTo((x + XMARGIN) as u16, (y + YMARGIN) as u16))?;
+                    if let 65..=72 = field[i] {
+                        stdout
+                            .execute(SetBackgroundColor(BRICKCOLORS[field[i] as usize - 65]))?
+                            .execute(Print(" "))?
+                            .execute(SetBackgroundColor(Color::Black))?;
+                    } else {
+                        stdout.execute(Print(field[i] as char))?;
+                    };
+                }
             }
         }
 
-        for yb in 0..BRICKMAX as isize {
-            for xb in 0..BRICKMAX as isize {
-                let pi = rotate(xb as usize, yb as usize, rotation);
-                if BRICKS[brick][pi] == PIXEL_SOLID {
-                    stdout
-                        .execute(cursor::MoveTo(
-                            (XMARGIN + x_brick + xb) as u16,
-                            (YMARGIN + y_brick + yb) as u16,
-                        ))?
-                        .execute(SetBackgroundColor(BRICKCOLORS[brick]))?
-                        .execute(Print(" "))?
-                        .execute(SetBackgroundColor(Color::Black))?;
+        // Remember what the field looks like, to avoid repainting if nothing changes
+
+        for k in 0..FIELD_SIZE as usize {
+            previous_field[k] = field[k];
+        }
+
+        // Paint falling brick
+
+        if move_brick
+            && (previous_x_brick != x_brick
+                || previous_y_brick != y_brick
+                || previous_rotation != rotation)
+        {
+            for yb in 0..BRICKMAX as isize {
+                for xb in 0..BRICKMAX as isize {
+                    let pi = rotate(xb as usize, yb as usize, previous_rotation);
+                    if BRICKS[brick][pi] == PIXEL_SOLID {
+                        stdout
+                            .execute(cursor::MoveTo(
+                                (XMARGIN + previous_x_brick + xb) as u16,
+                                (YMARGIN + previous_y_brick + yb) as u16,
+                            ))?
+                            .execute(Print(" "))?;
+                    }
+                }
+            }
+
+            previous_x_brick = x_brick;
+            previous_y_brick = y_brick;
+            previous_rotation = rotation;
+
+            for yb in 0..BRICKMAX as isize {
+                for xb in 0..BRICKMAX as isize {
+                    let pi = rotate(xb as usize, yb as usize, rotation);
+                    if BRICKS[brick][pi] == PIXEL_SOLID {
+                        stdout
+                            .execute(cursor::MoveTo(
+                                (XMARGIN + x_brick + xb) as u16,
+                                (YMARGIN + y_brick + yb) as u16,
+                            ))?
+                            .execute(SetBackgroundColor(BRICKCOLORS[brick]))?
+                            .execute(Print(" "))?
+                            .execute(SetBackgroundColor(Color::Black))?;
+                    }
                 }
             }
         }
