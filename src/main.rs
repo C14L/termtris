@@ -1,7 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-
 use rand::Rng;
 use std::io::{stdout, Write};
 use std::process::exit;
@@ -17,12 +13,12 @@ use crossterm::{
 
 const XMAX: isize = 12;
 const YMAX: isize = 18;
-const FIELD_SIZE: isize = (XMAX * YMAX);
+const FIELD_SIZE: isize = XMAX * YMAX;
 const XMARGIN: isize = 5;
 const YMARGIN: isize = 2;
 
-const XSCORE: isize = (XMAX + XMARGIN + 10);
-const YSCORE: isize = (0 + YMARGIN + 2);
+const XSCORE: isize = XMAX + XMARGIN + 10;
+const YSCORE: isize = 0 + YMARGIN + 2;
 
 const PIXEL_EMPTY: u8 = b' ';
 const PIXEL_SOLID: u8 = b'X';
@@ -54,14 +50,13 @@ fn main() -> Result<()> {
     let mut rng = rand::thread_rng();
 
     let mut is_bucket_full: bool = false;
-    let mut is_brick_falling: bool;
     let mut is_free_fall: bool = false;
     let mut is_paused = false;
 
     let mut field: Field = [PIXEL_EMPTY; FIELD_SIZE as usize];
     let mut previous_field: Field = [PIXEL_EMPTY; FIELD_SIZE as usize];
 
-    let mut score: usize = 0;
+    let score: usize = 0;  // TODO: make mut, count score
     let mut brick: usize = rng.gen_range(0, BRICKS.len());
     let mut rotation: usize = 0; // 1=90deg, 2=180deg, 3=270deg
     let rotate_cw: bool = false;

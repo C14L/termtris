@@ -3,7 +3,9 @@
 First attempts to write some command line Rust. A crude version
 of the game of bricks falling into a bucket.
 
-##Build
+![termtris screenshot](screenshot.png)
+
+## Build
 
 Build using Cargo:
 
